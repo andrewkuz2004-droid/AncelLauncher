@@ -1,0 +1,22 @@
+{
+  "nickname": "Player",
+  "player_profiles": [
+    "Player"
+  ],
+  "active_player_profile": "Player",
+  "version": "",
+  "ram_gb": 4,
+  "show_all": false,
+  "java_path": "",
+  "loader_kind": "Vanilla",
+  "loader_version": "",
+  "modified_version": false,
+  "show_console": false,
+  "profile_skins": {},
+  "account_type": "local",
+  "ely_accounts": {},
+  "active_profile": "local:Player",
+  "instances": [],
+  "active_instance": "",
+  "language": "auto"
+}
