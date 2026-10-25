@@ -11,7 +11,8 @@ AncelLauncher — простой лаунчер Minecraft: Java Edition (вер�
   * локальные профили и аккаунты Ely.by.
 
 Запуск:  pythonw AncelLauncher.pyw   или   python AncelLauncher.pyw
-Данные игры: папка minecraft/ рядом с программой.
+Данные (.exe): папка data/ рядом с программой (конфиг, лог, skins, minecraft).
+В режиме .pyw данные лежат рядом со скриптом, как раньше.
 Сборка exe: см. scripts/build_windows.bat и README.md.
 
 Сделан с помощью нейросети.
@@ -49,11 +50,34 @@ from tkinter import filedialog, messagebox, ttk
 # Настройки и константы
 # ----------------------------------------------------------------------------
 
-def _runtime_base():
-    """Каталог с данными пользователя (рядом с .pyw или .exe)."""
+def _install_base():
+    """Папка, где лежит .exe / .pyw (не путать с данными)."""
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent
+
+
+def _runtime_base():
+    """Каталог с данными пользователя.
+
+    • .pyw (разработка) — рядом со скриптом (как раньше).
+    • .exe — подпапка data/ рядом с exe, чтобы рядом с программой
+      не появлялись разрозненные файлы (конфиг, лог, skins, assets…).
+      Если рядом с exe уже есть старый launcher_config.json — используем
+      саму папку exe (обратная совместимость).
+    """
+    install = _install_base()
+    if not getattr(sys, "frozen", False):
+        return install
+    # Уже портативный расклад «всё рядом с exe» из прошлых версий
+    if (install / "launcher_config.json").is_file():
+        return install
+    data = install / "data"
+    try:
+        data.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return install
+    return data
 
 
 def _resource_base():
@@ -66,14 +90,16 @@ def _resource_base():
     return Path(__file__).resolve().parent
 
 
+INSTALL_DIR = _install_base()
 APP_DIR = _runtime_base()
 RESOURCE_DIR = _resource_base()
 CONFIG_FILE = APP_DIR / "launcher_config.json"
 LOG_FILE = APP_DIR / "launcher.log"
 SKINS_DIR = APP_DIR / "skins"
+CACHE_DIR = APP_DIR / "cache"
 LOCALE_DIR = RESOURCE_DIR / "locale"
 
-# Папка игры (версии, libraries, instances…). По умолчанию — minecraft/ рядом с лаунчером.
+# Папка игры (версии, libraries, instances…). По умолчанию — minecraft/ внутри data/.
 # Может быть переопределена в настройках (ключ game_dir в конфиге).
 GAME_DIR = APP_DIR / "minecraft"
 
@@ -864,14 +890,17 @@ def build_command(vjson, prep, java, game_dir, nick, ram_mb, auth_account=None, 
 
 
 def stream_process(command, cwd, log):
-    """Запускает процесс и выводит его сообщения в журнал. Возвращает код выхода."""
+    """Запускает процесс и выводит его сообщения в журнал.
+    Возвращает (код_выхода, длительность_сек)."""
+    t0 = time.time()
     proc = subprocess.Popen(
         command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, encoding="utf-8", errors="replace", creationflags=NO_WINDOW,
     )
     for line in proc.stdout:
         log(line.rstrip())
-    return proc.wait()
+    code = proc.wait()
+    return code, max(0.0, time.time() - t0)
 
 
 # ----------------------------------------------------------------------------
@@ -1111,8 +1140,9 @@ def ensure_loader(kind, mc, loader, vanilla, log, progress, status):
     status(t("installing_title_long", title=title))
     log(t("running_installer", title=title))
     progress(0, 0)  # бегущая полоска: время установки заранее неизвестно
-    code = stream_process([str(java), "-jar", str(installer), "--installClient", str(GAME_DIR)],
-                          GAME_DIR, log)
+    code, _duration = stream_process(
+        [str(java), "-jar", str(installer), "--installClient", str(GAME_DIR)],
+        GAME_DIR, log)
     progress(0, 1)
     if code != 0 or not (version_dir / f"{vid}.json").exists():
         raise LauncherError(
@@ -1223,17 +1253,15 @@ def ely_authenticate(login, password, totp="", client_token=None):
 
 
 def ely_ensure_session(account):
-    """Проверяет сохранённый токен перед запуском и при необходимости продлевает его.
-    Возвращает (account, изменился_ли_токен)."""
+    """Продлевает токен и подтягивает актуальный ник/UUID с Ely.by.
+
+    Всегда вызывает /auth/refresh (а не только validate), чтобы после смены
+    ника на сайте лаунчер увидел новое имя. Возвращает (account, changed).
+    """
     token = account.get("access_token")
     client_token = account.get("client_token")
     if not token or not client_token:
         raise ElyAuthError(t("ely_err_legacy"), relogin=True)
-    try:
-        ely_post("/auth/validate", {"accessToken": token})
-        return account, False
-    except ElyAuthError:
-        pass  # токен не принят — пробуем продлить
     try:
         result = ely_post("/auth/refresh", {"accessToken": token, "clientToken": client_token})
     except ElyAuthError as exc:
@@ -1242,7 +1270,36 @@ def ely_ensure_session(account):
     updated = dict(account)
     updated.update(access_token=fresh["access_token"], client_token=fresh["client_token"],
                    uuid=fresh["uuid"], username=fresh["username"])
-    return updated, True
+    changed = (
+        updated.get("username") != account.get("username")
+        or updated.get("uuid") != account.get("uuid")
+        or updated.get("access_token") != account.get("access_token")
+    )
+    return updated, changed
+
+
+def apply_ely_account_update(cfg, old_name, account):
+    """Записывает аккаунт Ely.by в конфиг; при смене ника переносит ключ и кэш скина."""
+    new_name = account.get("username") or old_name
+    ely = cfg.setdefault("ely_accounts", {})
+    if old_name and old_name != new_name and old_name in ely:
+        ely.pop(old_name, None)
+        old_skin = ely_skin_cache_path(old_name)
+        new_skin = ely_skin_cache_path(new_name)
+        if old_skin.is_file():
+            try:
+                new_skin.parent.mkdir(parents=True, exist_ok=True)
+                if new_skin.is_file():
+                    old_skin.unlink(missing_ok=True)
+                else:
+                    shutil.move(str(old_skin), str(new_skin))
+            except OSError:
+                pass
+        if cfg.get("active_profile") == profile_key("ely", old_name):
+            cfg["active_profile"] = profile_key("ely", new_name)
+    ely[new_name] = account
+    migrate_profiles(cfg)
+    return new_name
 
 
 def ely_invalidate(account):
@@ -1426,13 +1483,18 @@ def ely_skin_cache_path(username):
     return SKINS_DIR / "ely_cache" / f"{safe}.png"
 
 
-def download_ely_skin(username, force=False):
-    """Скачать скин с skinsystem.ely.by в локальный кэш. None если нет."""
+def download_ely_skin(username, force=False, max_age=3600):
+    """Скачать скин с skinsystem.ely.by в локальный кэш. None если нет.
+
+    max_age — если кэш старше (сек), скачиваем заново (даже без force).
+    """
     if not username:
         return None
     dest = ely_skin_cache_path(username)
-    if dest.is_file() and not force and dest.stat().st_size > 100:
-        return dest
+    if dest.is_file() and dest.stat().st_size > 100 and not force:
+        age = time.time() - dest.stat().st_mtime
+        if age < max_age:
+            return dest
     url = f"https://skinsystem.ely.by/skins/{urllib.parse.quote(username)}.png"
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -1440,32 +1502,28 @@ def download_ely_skin(username, force=False):
         with urllib.request.urlopen(req, timeout=12) as resp:
             data = resp.read()
         if not data or len(data) < 100:
-            return None
+            return dest if dest.is_file() and dest.stat().st_size > 100 else None
         # простая проверка PNG
         if data[:8] != b"\x89PNG\r\n\x1a\n":
-            return None
+            return dest if dest.is_file() and dest.stat().st_size > 100 else None
         dest.write_bytes(data)
         return dest
     except Exception:
-        return None
+        return dest if dest.is_file() and dest.stat().st_size > 100 else None
 
 
-def resolve_profile_skin_file(cfg, profile):
+def resolve_profile_skin_file(cfg, profile, force=False):
     """Путь к PNG-скину для иконки головы.
 
     Локальный профиль → None (рисуем ч/б Steve).
-    Ely.by → кэш skinsystem.ely.by или уже скачанный файл.
+    Ely.by → кэш skinsystem.ely.by (с периодическим обновлением).
     """
     if not profile:
         return None
     if profile.get("type") != "ely":
         return None
     name = profile.get("name") or ""
-    cached = ely_skin_cache_path(name)
-    if cached.is_file() and cached.stat().st_size > 100:
-        return cached
-    # синхронно пробуем скачать (быстрый кэш после первого раза)
-    return download_ely_skin(name)
+    return download_ely_skin(name, force=force)
 
 
 # --- установки (instances) ---------------------------------------------------
@@ -1509,6 +1567,26 @@ def instance_summary(inst):
         if inst.get("loader_version"):
             text += " " + inst["loader_version"]
     return text
+
+
+def format_playtime(seconds):
+    """Человекочитаемое время игры для списка экземпляров."""
+    try:
+        seconds = int(seconds or 0)
+    except (TypeError, ValueError):
+        seconds = 0
+    if seconds < 60:
+        return t("playtime_lt_minute")
+    minutes = seconds // 60
+    if minutes < 60:
+        return t("playtime_minutes", n=minutes)
+    hours = minutes // 60
+    mins = minutes % 60
+    if hours < 48:
+        return t("playtime_hours", h=hours, m=mins)
+    days = hours // 24
+    hours = hours % 24
+    return t("playtime_days", d=days, h=hours)
 
 
 def instance_label(inst):
@@ -2061,7 +2139,7 @@ def install_and_launch(entry, loader, nick, ram_mb, log, progress, status, launc
     if not launch_game:
         status(t("install_done"))
         progress(0, 1)
-        return
+        return 0.0
 
     # 4. Запуск
     game_dir = Path(game_dir) if game_dir else instance_dir(kind, mc)
@@ -2074,10 +2152,13 @@ def install_and_launch(entry, loader, nick, ram_mb, log, progress, status, launc
     status(t("game_started"))
     progress(0, 1)
     log(t("game_launching", version=version_id))
-    code = stream_process(command, game_dir, log)
+    code, duration = stream_process(command, game_dir, log)
     log(t("game_exit_code", code=code))
     if code != 0:
-        raise LauncherError(t("game_exit_error", code=code))
+        err = LauncherError(t("game_exit_error", code=code))
+        err.play_duration = duration
+        raise err
+    return duration
 
 
 
@@ -2086,19 +2167,32 @@ def install_and_launch(entry, loader, nick, ram_mb, log, progress, status, launc
 # ----------------------------------------------------------------------------
 
 def prepare_pixel_font():
-    """Download Press Start 2P on first launch; use the system font if offline."""
+    """Подключить Press Start 2P: сначала из бандла, иначе из кэша data/."""
     if os.name != "nt":
         return None
-    font_dir = APP_DIR / "assets" / "fonts"
-    font_file = font_dir / "PressStart2P-Regular.ttf"
-    license_file = font_dir / "OFL.txt"
-    font_dir.mkdir(parents=True, exist_ok=True)
-    sources = {
-        font_file: "https://raw.githubusercontent.com/google/fonts/main/ofl/pressstart2p/PressStart2P-Regular.ttf",
-        license_file: "https://raw.githubusercontent.com/google/fonts/main/ofl/pressstart2p/OFL.txt",
-    }
-    for target, url in sources.items():
-        if not target.exists() or target.stat().st_size < 1000:
+
+    candidates = [
+        RESOURCE_DIR / "assets" / "fonts" / "PressStart2P-Regular.ttf",
+        CACHE_DIR / "fonts" / "PressStart2P-Regular.ttf",
+    ]
+    font_file = next((p for p in candidates if p.is_file() and p.stat().st_size > 1000), None)
+
+    if font_file is None:
+        # Скачиваем только в data/cache, никогда рядом с .exe в assets/
+        cache_dir = CACHE_DIR / "fonts"
+        try:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return None
+        font_file = cache_dir / "PressStart2P-Regular.ttf"
+        license_file = cache_dir / "OFL.txt"
+        sources = {
+            font_file: "https://raw.githubusercontent.com/google/fonts/main/ofl/pressstart2p/PressStart2P-Regular.ttf",
+            license_file: "https://raw.githubusercontent.com/google/fonts/main/ofl/pressstart2p/OFL.txt",
+        }
+        for target, url in sources.items():
+            if target.exists() and target.stat().st_size >= 1000:
+                continue
             try:
                 request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
                 with urllib.request.urlopen(request, timeout=4) as response:
@@ -2111,7 +2205,8 @@ def prepare_pixel_font():
             except Exception:
                 # Offline startup must never be blocked by a missing decorative font.
                 pass
-    if font_file.exists() and font_file.stat().st_size > 1000:
+
+    if font_file is not None and font_file.is_file() and font_file.stat().st_size > 1000:
         try:
             import ctypes
             FR_PRIVATE = 0x10
@@ -2979,7 +3074,7 @@ class App:
                 iid = inst["id"]
                 name = inst.get("name") or t("instance_label_fallback")
                 summary = instance_summary(inst)
-                mark = ""
+                play = format_playtime(inst.get("playtime_seconds", 0))
                 kind = inst.get("kind") or "vanilla"
                 icon_name = kind if kind in ("fabric", "quilt", "forge", "neoforge") else "vanilla"
                 image = self._ui_icon(icon_name)
@@ -2987,7 +3082,9 @@ class App:
                 if image is not None:
                     self._instances_page_images.append(image)
                     kwargs["image"] = image
-                tree.insert("", "end", iid=iid, text=f"  {name}  ·  {summary}{mark}", **kwargs)
+                tree.insert(
+                    "", "end", iid=iid,
+                    text=f"  {name}  ·  {summary}  ·  {play}", **kwargs)
             if active and tree.exists(active):
                 tree.selection_set(active)
                 tree.focus(active)
@@ -3107,6 +3204,9 @@ class App:
         foot.grid(row=2, column=0, sticky="ew", padx=18, pady=(8, 16))
         ui_button(foot, text=t("profile_configure"), command=self._page_configure_profile).pack(
             side="left")
+        self._profile_refresh_btn = ui_button(
+            foot, text=t("profile_refresh"), command=self._page_refresh_profile, state="disabled")
+        self._profile_refresh_btn.pack(side="left", padx=(8, 0))
         ui_button(foot, text=t("delete"), command=self._page_delete_profile).pack(
             side="left", padx=(8, 0))
 
@@ -3117,6 +3217,26 @@ class App:
         tree.bind("<Double-1>", on_double)
         return page
 
+    def _update_profile_refresh_button(self):
+        """«Обновить» активна только для выбранного аккаунта Ely.by."""
+        btn = getattr(self, "_profile_refresh_btn", None)
+        if btn is None:
+            return
+        tree = getattr(self, "_profiles_tree", None)
+        is_ely = False
+        if tree is not None:
+            sel = tree.selection()
+            if sel:
+                key = sel[0]
+                is_ely = key.startswith("ely:")
+            else:
+                cur = active_profile(self.cfg)
+                is_ely = bool(cur and cur.get("type") == "ely")
+        try:
+            btn.configure(state="normal" if is_ely else "disabled")
+        except tk.TclError:
+            pass
+
     def _on_profiles_tree_select(self, _e=None):
         if getattr(self, "_profiles_refreshing", False):
             return
@@ -3124,6 +3244,7 @@ class App:
         if tree is None:
             return
         sel = tree.selection()
+        self._update_profile_refresh_button()
         if not sel:
             return
         key = sel[0]
@@ -3161,6 +3282,7 @@ class App:
                 tree.focus(active)
                 tree.see(active)
             tree.bind("<<TreeviewSelect>>", self._on_profiles_tree_select)
+            self._update_profile_refresh_button()
         finally:
             self._profiles_refreshing = False
 
@@ -3178,9 +3300,55 @@ class App:
             return
         if p["type"] == "ely":
             self.open_ely_profile()
+            # После правок на сайте пользователь нажмёт «Обновить»
+            self.status_var.set(t("ely_refresh_hint"))
         else:
             self.open_local_profile_settings()
         self._refresh_profiles_page()
+
+    def _page_refresh_profile(self):
+        """Обновить ник и скин выбранного аккаунта Ely.by с сервера."""
+        tree = getattr(self, "_profiles_tree", None)
+        key = tree.selection()[0] if tree is not None and tree.selection() else None
+        if not key:
+            cur = active_profile(self.cfg)
+            key = cur["key"] if cur else None
+        if not key:
+            return
+        p = next((item for item in profile_list(self.cfg) if item["key"] == key), None)
+        if not p or p["type"] != "ely":
+            messagebox.showinfo(t("profile_refresh"), t("profile_refresh_local_only"),
+                                parent=self.root)
+            return
+        if getattr(self, "_ely_refresh_running", False):
+            self.status_var.set(t("ely_login_busy"))
+            return
+        old_name = p["name"]
+        account = dict(self.cfg.get("ely_accounts", {}).get(old_name) or {})
+        if not account:
+            messagebox.showwarning("Ely.by", t("ely_account_missing"), parent=self.root)
+            return
+        self._ely_refresh_running = True
+        self.status_var.set(t("ely_refreshing"))
+
+        def work():
+            try:
+                fresh, _changed = ely_ensure_session(account)
+                download_ely_skin(fresh.get("username") or old_name, force=True)
+                self.q.put(("ely_profile_refreshed", old_name, dict(fresh)))
+            except ElyAuthError as exc:
+                if getattr(exc, "relogin", False):
+                    self.q.put(("ely_relogin", old_name))
+                else:
+                    self.q.put(("error", str(exc)))
+                self.q.put(("status", t("status_error")))
+            except Exception as exc:  # noqa: BLE001
+                self.q.put(("error", str(exc)))
+                self.q.put(("status", t("status_error")))
+            finally:
+                self.q.put(("ely_refresh_done",))
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _page_delete_profile(self):
         tree = getattr(self, "_profiles_tree", None)
@@ -3479,8 +3647,14 @@ class App:
                     head = extract_skin_head(skin_file, size=size, grayscale=False)
                     if head is not None:
                         img = self._pil_to_photo(head)
-                # фоновая подгрузка, если кэша ещё нет
-                if img is None:
+                # фоновая подгрузка: нет кэша или кэш устарел
+                need_fetch = img is None
+                if not need_fetch and skin_file is not None:
+                    try:
+                        need_fetch = (time.time() - skin_file.stat().st_mtime) > 3600
+                    except OSError:
+                        need_fetch = True
+                if need_fetch:
                     def _fetch(n=name, s=size, k=key):
                         path = download_ely_skin(n, force=True)
                         if path is None:
@@ -3493,6 +3667,7 @@ class App:
                                 photo = self._pil_to_photo(head)
                                 self._head_cache[k] = photo
                                 self.refresh_profile_ui()
+                                self._refresh_profiles_page()
                             except Exception:
                                 pass
                         try:
@@ -3599,10 +3774,17 @@ class App:
                 # лёгкое затемнение снизу/сверху для читаемости панелей
                 from PIL import ImageEnhance
                 cropped = ImageEnhance.Brightness(cropped).enhance(0.85)
-                tmp = APP_DIR / "assets" / "_hero_runtime.png"
-                tmp.parent.mkdir(parents=True, exist_ok=True)
-                cropped.save(tmp, format="PNG")
-                self._hero_photo = tk.PhotoImage(file=str(tmp))
+                tmp = CACHE_DIR / "_hero_runtime.png"
+                try:
+                    tmp.parent.mkdir(parents=True, exist_ok=True)
+                    cropped.save(tmp, format="PNG")
+                    self._hero_photo = tk.PhotoImage(file=str(tmp))
+                except Exception:
+                    # Фолбэк без файла на диске — через память
+                    import io
+                    buf = io.BytesIO()
+                    cropped.save(buf, format="PNG")
+                    self._hero_photo = tk.PhotoImage(data=buf.getvalue())
                 self._hero_size = (w, h)
                 c.create_image(0, 0, anchor="nw", image=self._hero_photo)
                 painted = True
@@ -7069,12 +7251,37 @@ class App:
                         self._show_progress(False)
                 elif kind == "installed":
                     self.refresh_instance_ui()
+                elif kind == "playtime":
+                    iid, added = msg[1], msg[2]
+                    for inst in self.cfg.get("instances", []):
+                        if inst.get("id") == iid:
+                            prev = int(inst.get("playtime_seconds") or 0)
+                            inst["playtime_seconds"] = prev + max(0, int(added))
+                            save_config(self.cfg)
+                            self.refresh_instance_ui()
+                            self._refresh_instances_page()
+                            break
                 elif kind == "ely_refreshed":
+                    # msg: ("ely_refreshed", account, old_name)
                     account = msg[1]
-                    if account.get("username") in self.cfg.get("ely_accounts", {}):
-                        self.cfg["ely_accounts"][account["username"]] = account
-                        save_config(self.cfg)
+                    old_name = msg[2] if len(msg) > 2 else account.get("username")
+                    apply_ely_account_update(self.cfg, old_name, account)
+                    save_config(self.cfg)
+                    self._invalidate_head_cache()
+                    self.refresh_profile_ui()
+                    self._refresh_profiles_page()
+                elif kind == "ely_profile_refreshed":
+                    old_name, account = msg[1], msg[2]
+                    new_name = apply_ely_account_update(self.cfg, old_name, account)
+                    save_config(self.cfg)
+                    self._invalidate_head_cache()
+                    self.refresh_profile_ui()
+                    self._refresh_profiles_page()
+                    self.status_var.set(t("ely_refreshed_ok", username=new_name))
+                elif kind == "ely_refresh_done":
+                    self._ely_refresh_running = False
                 elif kind == "ely_relogin":
+                    self._ely_refresh_running = False
                     self.add_ely_account(prefill_login=msg[1])
                 elif kind == "error":
                     self.set_console(True)  # при ошибке сразу показываем консоль
@@ -7146,24 +7353,34 @@ class App:
             return
         entry = self.versions.get(inst["mc"]) or {"id": inst["mc"], "type": "release"}
         ram_mb = max(1, min(32, int(inst.get("ram_gb", 4) or 4))) * 1024
-        self.cfg.update(version=inst["mc"], active_instance=inst["id"])
+        instance_id = inst.get("id")
+        self.cfg.update(version=inst["mc"], active_instance=instance_id)
         save_config(self.cfg)
         threading.Thread(
             target=self.worker,
-            args=(entry, loader, nick, ram_mb, launch_game, auth_account, game_dir), daemon=True,
+            args=(entry, loader, nick, ram_mb, launch_game, auth_account, game_dir, instance_id),
+            daemon=True,
         ).start()
 
-    def worker(self, entry, loader, nick, ram_mb, launch_game=True, auth_account=None, game_dir=None):
+    def worker(self, entry, loader, nick, ram_mb, launch_game=True, auth_account=None,
+               game_dir=None, instance_id=None):
         put = self.q.put
         put(("busy", True))
+        old_ely_name = (auth_account or {}).get("username") or nick
         try:
             if launch_game and auth_account:
                 # Сессию Ely.by проверяем заранее, в фоне, чтобы окно не зависало
                 put(("status", t("ely_session_check")))
                 auth_account, changed = ely_ensure_session(auth_account)
                 if changed:
-                    put(("ely_refreshed", dict(auth_account)))
-            install_and_launch(
+                    put(("ely_refreshed", dict(auth_account), old_ely_name))
+                    # подтянуть скин на новый ник
+                    try:
+                        download_ely_skin(auth_account.get("username") or old_ely_name, force=True)
+                    except Exception:
+                        pass
+                    nick = auth_account.get("username") or nick
+            duration = install_and_launch(
                 entry, loader, nick, ram_mb,
                 log=lambda text: put(("log", text)),
                 progress=lambda done, total: put(("progress", done, total)),
@@ -7171,13 +7388,18 @@ class App:
                 launch_game=launch_game,
                 auth_account=auth_account if launch_game else None,
                 game_dir=game_dir,
-            )
+            ) or 0.0
+            if launch_game and instance_id and duration > 0:
+                put(("playtime", instance_id, int(duration)))
             put(("installed", not launch_game))
             put(("status", t("ready_play") if not launch_game else t("ready_again")))
         except LauncherError as e:
             put(("progress", 0, 1))
             put(("log", t("log_error", error=e)))
             put(("status", t("status_error")))
+            play_dur = getattr(e, "play_duration", None)
+            if launch_game and instance_id and play_dur and play_dur > 0:
+                put(("playtime", instance_id, int(play_dur)))
             if getattr(e, "relogin", False) and auth_account:
                 put(("ely_relogin", auth_account.get("username", nick)))
             else:

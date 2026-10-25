@@ -278,12 +278,21 @@
   "modrinth_range_ru": "{start}–{end} of {total} · page {page}/{pages} · selected: {checked}",
   "settings_game_dir": "Game folder",
   "settings_game_dir_browse": "Choose folder for Minecraft files",
-  "settings_game_dir_hint": "Versions, libraries, assets and instances are stored here. Default is the minecraft folder next to the launcher.",
+  "settings_game_dir_hint": "Versions, libraries, assets and instances are stored here. Default is data/minecraft next to the launcher (for the .exe build).",
   "settings_browse": "Browse…",
   "nav_instances": "Instances",
   "nav_profiles": "Profiles",
   "nav_settings": "Settings",
   "settings_saved": "Settings saved.",
   "instance_edit_action": "Edit",
-  "nav_home": "Home"
+  "nav_home": "Home",
+  "profile_refresh": "Refresh",
+  "profile_refresh_local_only": "Server refresh is available only for Ely.by accounts.",
+  "ely_refreshing": "Refreshing Ely.by account…",
+  "ely_refreshed_ok": "Account “{username}” updated (name and skin).",
+  "ely_refresh_hint": "After changing your name or skin on the website, press Refresh.",
+  "playtime_lt_minute": "under a minute",
+  "playtime_minutes": "{n} min",
+  "playtime_hours": "{h} h {m} min",
+  "playtime_days": "{d} d {h} h"
 }

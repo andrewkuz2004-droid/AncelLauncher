@@ -278,12 +278,21 @@
   "modrinth_range_ru": "{start}–{end} из {total} · стр. {page}/{pages} · отмечено: {checked}",
   "settings_game_dir": "Папка игры",
   "settings_game_dir_browse": "Выберите папку для файлов Minecraft",
-  "settings_game_dir_hint": "Сюда скачиваются версии, библиотеки, ассеты и экземпляры (сборки). По умолчанию — папка minecraft рядом с лаунчером.",
+  "settings_game_dir_hint": "Сюда скачиваются версии, библиотеки, ассеты и экземпляры (сборки). По умолчанию — папка data/minecraft рядом с лаунчером (для .exe).",
   "settings_browse": "Обзор…",
   "nav_instances": "Экземпляры",
   "nav_profiles": "Профили",
   "nav_settings": "Настройки",
   "settings_saved": "Настройки сохранены.",
   "instance_edit_action": "Изменить",
-  "nav_home": "Главный экран"
+  "nav_home": "Главный экран",
+  "profile_refresh": "Обновить",
+  "profile_refresh_local_only": "Обновление с сервера доступно только для аккаунтов Ely.by.",
+  "ely_refreshing": "Обновление аккаунта Ely.by…",
+  "ely_refreshed_ok": "Аккаунт «{username}» обновлён (ник и скин).",
+  "ely_refresh_hint": "После смены ника или скина на сайте нажмите «Обновить».",
+  "playtime_lt_minute": "менее минуты",
+  "playtime_minutes": "{n} мин",
+  "playtime_hours": "{h} ч {m} мин",
+  "playtime_days": "{d} д {h} ч"
 }
