@@ -129,7 +129,7 @@ def apply_game_dir(cfg=None):
 
 MANIFEST_URL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
 ASSETS_URL = "https://resources.download.minecraft.net"
-LAUNCHER_VERSION = "1.0_alpha"
+LAUNCHER_VERSION = "1.0.1_alpha"
 USER_AGENT = f"AncelLauncher/{LAUNCHER_VERSION} (desktop Minecraft launcher)"
 MODRINTH_API = "https://api.modrinth.com/v2"
 
