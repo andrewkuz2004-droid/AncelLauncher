@@ -1,11 +1,5 @@
-# AncelLauncher
-Простой лаунчер для Minecraft, сделанный по приколу. В данный момент находится в альфа-версии.
-<img width="1280" height="819" alt="image" src="https://github.com/user-attachments/assets/8cf6cee2-96e9-42ec-b897-e7577f2ed045" />
-Возможности:
-1. Возможность пользоваться локальным профилем или авторизоваться через Ely.by.
-2. Установка модов, ресурспаков и шейдеров из Modrinth в один клик.
-3. Создание экземпляров и импорт сборок.
-4. Выбор и установка загрузчиков.
+<img width="2172" height="724" alt="c6528bb3-477c-4992-bbea-cf14e67b1cfb" src="https://github.com/user-attachments/assets/32e3bb35-89ff-4ca9-adb4-968ffaba3feb" />
+Простой лаунчер для Minecraft с возможность ставить сборки и моды из Modrinth (пока что) в один клик. Сделан по приколу
 
 Сборка:
 1. Запускаете файл build_windows.bat или build_windows.sh, что находятся в папке scripts
