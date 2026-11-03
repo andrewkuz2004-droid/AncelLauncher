@@ -5,7 +5,7 @@
   ],
   "active_player_profile": "Player",
   "version": "",
-  "ram_gb": 4,
+  "ram_gb": 2,
   "show_all": false,
   "java_path": "",
   "loader_kind": "Vanilla",
@@ -18,5 +18,6 @@
   "active_profile": "local:Player",
   "instances": [],
   "active_instance": "",
-  "language": "auto"
+  "language": "auto",
+  "game_dir": ""
 }
