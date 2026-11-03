@@ -8,8 +8,8 @@
 
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 0, 1, 0),
-    prodvers=(1, 0, 1, 0),
+    filevers=(1, 0, 0, 0),
+    prodvers=(1, 0, 0, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -24,12 +24,12 @@ VSVersionInfo(
         u'040904B0',
         [StringStruct(u'CompanyName', u'AncelLauncher Project'),
         StringStruct(u'FileDescription', u'AncelLauncher - Minecraft launcher'),
-        StringStruct(u'FileVersion', u'1.0.1 alpha'),
+        StringStruct(u'FileVersion', u'1.0_beta'),
         StringStruct(u'InternalName', u'AncelLauncher'),
         StringStruct(u'LegalCopyright', u'AncelLauncher Project'),
         StringStruct(u'OriginalFilename', u'AncelLauncher.exe'),
         StringStruct(u'ProductName', u'AncelLauncher'),
-        StringStruct(u'ProductVersion', u'1.0.1 alpha')])
+        StringStruct(u'ProductVersion', u'1.0_beta')])
       ]),
     VarFileInfo([VarStruct(u'Translation', [1049, 1200])])
   ]
