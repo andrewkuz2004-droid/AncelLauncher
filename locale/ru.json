@@ -12,10 +12,10 @@
   "settings_save": "Сохранить",
   "settings_cancel": "Отмена",
   "settings_restart_hint": "Смена языка применится сразу в этом окне; часть подписей обновится после перезапуска.",
-  "play": "Играть",
+  "play": "Запустить Minecraft",
   "console": "Консоль",
   "no_instance": "  Нет экземпляров  ▾",
-  "create_instance": "Создать экземпляр",
+  "create_instance": "Создать сборку",
   "import_instance": "Импортировать сборку",
   "import_title": "Импорт сборки",
   "import_choose": "Выберите папку сборки или архив (.zip / .mrpack)",
@@ -294,5 +294,6 @@
   "playtime_lt_minute": "менее минуты",
   "playtime_minutes": "{n} мин",
   "playtime_hours": "{h} ч {m} мин",
-  "playtime_days": "{d} д {h} ч"
+  "playtime_days": "{d} д {h} ч",
+  "instances_subtitle": "Твоя игровая библиотека"
 }

@@ -12,7 +12,7 @@
   "settings_save": "Save",
   "settings_cancel": "Cancel",
   "settings_restart_hint": "Language applies immediately here; some labels update after restart.",
-  "play": "Play",
+  "play": "Launch Minecraft",
   "console": "Console",
   "no_instance": "  No instances  ▾",
   "create_instance": "Create instance",
@@ -294,5 +294,6 @@
   "playtime_lt_minute": "under a minute",
   "playtime_minutes": "{n} min",
   "playtime_hours": "{h} h {m} min",
-  "playtime_days": "{d} d {h} h"
+  "playtime_days": "{d} d {h} h",
+  "instances_subtitle": "Your game library"
 }
